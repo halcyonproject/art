@@ -106,9 +106,7 @@ ART_TEST_MODULES_COMMON := \
     art_compiler_host_tests \
     art_compiler_tests \
     art_dexanalyze_tests \
-    art_dexdiag_tests \
     art_dexdump_tests \
-    art_dexlayout_tests \
     art_dexlist_tests \
     art_dexoptanalyzer_tests \
     art_disassembler_tests \
@@ -136,7 +134,6 @@ endif
 
 ART_TEST_MODULES_TARGET := $(ART_TEST_MODULES_COMMON) \
     art_artd_tests \
-    art_dexopt_chroot_setup_tests \
     art_odrefresh_tests \
 
 ART_TEST_MODULES_HOST := $(ART_TEST_MODULES_COMMON)
@@ -146,7 +143,6 @@ ifneq (,$(wildcard frameworks/native/libs/binder))
   # can build the libbinder_ndk dependency. It is not available as a prebuilt on
   # master-art.
   ART_TEST_MODULES_HOST += art_artd_tests
-  ART_TEST_MODULES_HOST += art_dexopt_chroot_setup_tests
 endif
 
 ART_TARGET_GTEST_NAMES := $(foreach tm,$(ART_TEST_MODULES_TARGET),\
@@ -275,7 +271,7 @@ else
 # under ASAN.
 $$(gtest_output): $$(gtest_exe) $$(gtest_deps)
 	$(hide) ($$(call ART_TEST_SKIP,$$(NAME)) && set -o pipefail && \
-		ASAN_OPTIONS=detect_leaks=1 timeout --foreground -k 120s 3600s \
+		ASAN_OPTIONS=detect_leaks=1 timeout --foreground -k 180s 3600s \
 			$(HOST_OUT_EXECUTABLES)/signal_dumper -s 15 \
 				$$< --gtest_output=xml:$$@ 2>&1 | tee $$<.tmp.out >&2 && \
 		{ $$(call ART_TEST_PASSED,$$(NAME)) ; rm $$<.tmp.out ; }) || \

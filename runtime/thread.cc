@@ -118,11 +118,8 @@
 #endif
 
 #if ART_USE_FUTEXES
-#include "linux/futex.h"
-#include "sys/syscall.h"
-#ifndef SYS_futex
-#define SYS_futex __NR_futex
-#endif
+#include <linux/futex.h>
+#include <sys/syscall.h>
 #endif  // ART_USE_FUTEXES
 
 #pragma clang diagnostic push
@@ -4846,7 +4843,7 @@ int Thread::GetNativePriority() const {
   return priority;
 }
 
-void Thread::AbortInThis(std::string message) {
+void Thread::AbortInThis(const std::string& message) {
   std::string thread_name;
   Thread::Current()->GetThreadName(thread_name);
   LOG(ERROR) << message;

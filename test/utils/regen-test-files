@@ -229,6 +229,8 @@ postsubmit_only_tests = frozenset([
 
 known_failing_on_hwasan_tests = frozenset([
   "CtsJdwpTestCases", # times out
+  # apexd fails to unmount com.android.runtime on ASan builds.
+  "art_standalone_dexopt_chroot_setup_tests",
 ])
 
 # ART gtests that do not need root access to the device.
@@ -240,7 +242,6 @@ art_gtest_user_module_names = [
     "art_standalone_dex2oat_tests",
     "art_standalone_dexdump_tests",
     "art_standalone_dexlist_tests",
-    "art_standalone_dexopt_chroot_setup_tests",
     "art_standalone_libartbase_tests",
     "art_standalone_libartpalette_tests",
     "art_standalone_libartservice_tests",
@@ -252,11 +253,13 @@ art_gtest_user_module_names = [
     "art_standalone_odrefresh_tests",
     "art_standalone_runtime_tests",
     "art_standalone_sigchain_tests",
+    "libnativebridge-tests",
     "libnativeloader_test",
 ]
 
 # ART gtests that need root access to the device.
 art_gtest_eng_only_module_names = [
+    "art_standalone_dexopt_chroot_setup_tests",
     "art_standalone_dexoptanalyzer_tests",
     "art_standalone_profman_tests",
     "libnativeloader_e2e_tests",
@@ -270,7 +273,6 @@ art_gtest_module_names = sorted(art_gtest_user_module_names + art_gtest_eng_only
 # removing them from this set (in order to promote them to
 # presubmits).
 art_gtest_postsubmit_only_module_names = [
-  "art_standalone_dexopt_chroot_setup_tests",
 ]
 
 # ART gtests supported in MTS that do not need root access to the device.
@@ -539,12 +541,13 @@ class Generator:
 
     # Optional test metadata (JSON file).
     metadata = self.get_test_metadata(run_test)
+    is_cts_test = "cts" in metadata.get("test_suites", [])
 
     run_test_module_name = ART_RUN_TEST_MODULE_NAME_PREFIX + run_test
 
     # Set the test configuration template.
     if self.is_runnable(run_test):
-      if "cts" in metadata.get("test_suites", []):
+      if is_cts_test:
         test_config_template = "art-run-test-target-cts-template"
       elif self.is_slow(run_test):
         test_config_template = "art-run-test-target-slow-template"
@@ -573,6 +576,16 @@ class Generator:
           // Include the Java source files in the test's artifacts, to make Checker assertions
           // available to the TradeFed test runner.
           include_srcs: true,"""
+
+    # Set the version of the SDK to compile the Java test module
+    # against, if needed.
+    sdk_version_prop = ""
+    if is_cts_test:
+      # Have CTS test modules use the test API (`test_current`) so
+      # that they do not depend on the framework private platform API
+      # (`private`), which is the default.
+      sdk_version_prop = """
+          sdk_version: "test_current","""
 
     # The default source directory is `src`, except if `src-art` exists.
     if os.path.isdir(os.path.join(run_test_path, "src-art")):
@@ -613,7 +626,7 @@ class Generator:
           data: [
               ":{run_test_module_name}-expected-stdout",
               ":{run_test_module_name}-expected-stderr",
-          ],{test_suites_prop}{include_srcs_prop}
+          ],{test_suites_prop}{include_srcs_prop}{sdk_version_prop}
       }}
       """))
 
@@ -695,6 +708,13 @@ class Generator:
                      [],
                      mainline_presubmit_apex_suffix)
 
+    # ART mainline presubmits tests without APEX suffix
+    art_mainline_presubmit_tests_dict = \
+        gen_tests_dict(mainline_presubmit_tests,
+                       failing_tests_excluded_from_mainline_presubmits,
+                       [],
+                       "")
+
     # Android Virtualization Framework presubmits
     avf_presubmit_tests = ["ComposHostTestCases"]
     avf_presubmit_tests_dict = gen_tests_dict(avf_presubmit_tests,
@@ -728,6 +748,7 @@ class Generator:
         (test_group_name, test_group_dict)
         for (test_group_name, test_group_dict)
         in [
+            ("art-mainline-presubmit", art_mainline_presubmit_tests_dict),
             ("mainline-presubmit", mainline_presubmit_tests_dict),
             ("presubmit", presubmit_tests_dict),
             ("hwasan-presubmit", hwasan_presubmit_tests_dict),
@@ -1050,6 +1071,8 @@ class Generator:
     print(f"Generated TEST_MAPPING entries for {num_expected_succeeding_tests} ART run-tests out"
           f" of {len(run_tests)} ({expected_succeeding_tests_percentage}%):")
     for (num_tests, test_kind, tests_percentage, test_group_name) in [
+        (num_mainline_presubmit_run_tests, "ART run-tests", mainline_presubmit_run_tests_percentage,
+         "art-mainline-presubmit"),
         (num_mainline_presubmit_run_tests, "ART run-tests", mainline_presubmit_run_tests_percentage,
          "mainline-presubmit"),
         (num_presubmit_run_tests, "ART run-tests", presubmit_run_tests_percentage, "presubmit"),

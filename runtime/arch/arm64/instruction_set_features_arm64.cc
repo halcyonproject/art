@@ -158,6 +158,7 @@ Arm64FeaturesUniquePtr Arm64InstructionSetFeatures::FromVariant(
         "kryo385",
         "kryo585",
         "kryo785",
+        "oryon",
     };
     if (!FindVariantInArray(
             other_arm64_known_variants, arraysize(other_arm64_known_variants), variant)) {

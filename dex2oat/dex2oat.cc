@@ -78,7 +78,6 @@
 #include "dex/quick_compiler_callbacks.h"
 #include "dex/verification_results.h"
 #include "dex2oat_options.h"
-#include "dexlayout.h"
 #include "driver/compiler_driver.h"
 #include "driver/compiler_options.h"
 #include "driver/compiler_options_map-inl.h"
@@ -154,34 +153,36 @@ static std::string StrippedCommandLine() {
   bool saw_zip_fd = false;
   bool saw_compiler_filter = false;
   for (int i = 0; i < original_argc; ++i) {
-    if (android::base::StartsWith(original_argv[i], "--zip-fd=")) {
+    std::string_view arg(original_argv[i]);
+    if (arg.starts_with("--zip-fd=")) {
       saw_zip_fd = true;
     }
-    if (android::base::StartsWith(original_argv[i], "--compiler-filter=")) {
+    if (arg.starts_with("--compiler-filter=")) {
       saw_compiler_filter = true;
     }
   }
 
   // Now filter out things.
   for (int i = 0; i < original_argc; ++i) {
+    std::string_view arg(original_argv[i]);
     // All runtime-arg parameters are dropped.
-    if (strcmp(original_argv[i], "--runtime-arg") == 0) {
+    if (arg == "--runtime-arg") {
       i++;  // Drop the next part, too.
       continue;
     }
 
     // Any instruction-setXXX is dropped.
-    if (android::base::StartsWith(original_argv[i], "--instruction-set")) {
+    if (arg.starts_with("--instruction-set")) {
       continue;
     }
 
     // The boot image is dropped.
-    if (android::base::StartsWith(original_argv[i], "--boot-image=")) {
+    if (arg.starts_with("--boot-image=")) {
       continue;
     }
 
     // The image format is dropped.
-    if (android::base::StartsWith(original_argv[i], "--image-format=")) {
+    if (arg.starts_with("--image-format=")) {
       continue;
     }
 
@@ -190,16 +191,16 @@ static std::string StrippedCommandLine() {
     // However, we prefer to drop this when we saw --zip-fd.
     if (saw_zip_fd) {
       // Drop anything --zip-X, --dex-X, --oat-X, --swap-X, or --app-image-X
-      if (android::base::StartsWith(original_argv[i], "--zip-") ||
-          android::base::StartsWith(original_argv[i], "--dex-") ||
-          android::base::StartsWith(original_argv[i], "--oat-") ||
-          android::base::StartsWith(original_argv[i], "--swap-") ||
-          android::base::StartsWith(original_argv[i], "--app-image-")) {
+      if (arg.starts_with("--zip-") ||
+          arg.starts_with("--dex-") ||
+          arg.starts_with("--oat-") ||
+          arg.starts_with("--swap-") ||
+          arg.starts_with("--app-image-")) {
         continue;
       }
     }
 
-    command.push_back(original_argv[i]);
+    command.push_back(std::string(arg));
   }
 
   if (!saw_compiler_filter) {
@@ -510,9 +511,7 @@ class OatKeyValueStore : public SafeMap<std::string, std::string> {
 class Dex2Oat final {
  public:
   explicit Dex2Oat(TimingLogger* timings)
-      : compiler_kind_(Compiler::kOptimizing),
-        // Take the default set of instruction features from the build.
-        key_value_store_(nullptr),
+      : key_value_store_(nullptr),
         verification_results_(nullptr),
         runtime_(nullptr),
         thread_count_(sysconf(_SC_NPROCESSORS_CONF)),
@@ -728,8 +727,8 @@ class Dex2Oat final {
 
     if (!IsBootImage() && boot_image_filename_.empty()) {
       DCHECK(!IsBootImageExtension());
-      if (std::any_of(runtime_args_.begin(), runtime_args_.end(), [](const char* arg) {
-            return android::base::StartsWith(arg, "-Xbootclasspath:");
+      if (std::any_of(runtime_args_.begin(), runtime_args_.end(), [](std::string_view arg) {
+            return arg.starts_with("-Xbootclasspath:");
           })) {
         LOG(WARNING) << "--boot-image is not specified while -Xbootclasspath is specified. Running "
                         "dex2oat in imageless mode";
@@ -1062,9 +1061,10 @@ class Dex2Oat final {
 
     M& args = *args_uptr;
 
+    std::string compact_dex_level;
     std::unique_ptr<ParserOptions> parser_options(new ParserOptions());
 
-    AssignIfExists(args, M::CompactDexLevel, &compact_dex_level_);
+    AssignIfExists(args, M::CompactDexLevel, &compact_dex_level);
     AssignIfExists(args, M::DexFiles, &dex_filenames_);
     AssignIfExists(args, M::DexLocations, &dex_locations_);
     AssignIfExists(args, M::DexFds, &dex_fds_);
@@ -1114,13 +1114,9 @@ class Dex2Oat final {
     AssignIfExists(args, M::PublicSdk, &public_sdk_);
     AssignIfExists(args, M::ApexVersions, &apex_versions_argument_);
 
-    if (compact_dex_level_ != CompactDexLevel::kCompactDexLevelNone) {
+    if (!compact_dex_level.empty()) {
       LOG(WARNING) << "Obsolete flag --compact-dex-level ignored";
-      compact_dex_level_ = CompactDexLevel::kCompactDexLevelNone;
     }
-
-    AssignIfExists(args, M::Backend, &compiler_kind_);
-    parser_options->requested_specific_compiler = args.Exists(M::Backend);
 
     AssignIfExists(args, M::TargetInstructionSet, &compiler_options_->instruction_set_);
     // arm actually means thumb2.
@@ -1231,12 +1227,6 @@ class Dex2Oat final {
                 << ", we override thread number to 1 to have determinism. It was " << thread_count_
                 << ".";
       thread_count_ = 1;
-    }
-
-    // For debuggable apps, we do not want to generate compact dex as class
-    // redefinition will want a proper dex file.
-    if (compiler_options_->GetDebuggable()) {
-      compact_dex_level_ = CompactDexLevel::kCompactDexLevelNone;
     }
 
     PaletteShouldReportDex2oatCompilation(&should_report_dex2oat_compilation_);
@@ -1627,7 +1617,7 @@ class Dex2Oat final {
       TimingLogger::ScopedTiming t3("Loading image checksum", timings_);
       std::string full_bcp = android::base::Join(runtime->GetBootClassPathLocations(), ':');
       std::string extension_part = ":" + android::base::Join(dex_locations_, ':');
-      if (!android::base::EndsWith(full_bcp, extension_part)) {
+      if (!full_bcp.ends_with(extension_part)) {
         LOG(ERROR) << "Full boot class path does not end with extension parts, full: " << full_bcp
             << ", extension: " << extension_part.substr(1u);
         return dex2oat::ReturnCode::kOther;
@@ -1743,6 +1733,7 @@ class Dex2Oat final {
 
     // Setup VerifierDeps for compilation and report if we fail to parse the data.
     if (input_vdex_file_ != nullptr) {
+      TimingLogger::ScopedTiming t_dex("Parse Verifier Deps", timings_);
       std::unique_ptr<verifier::VerifierDeps> verifier_deps(
           new verifier::VerifierDeps(dex_files, /*output_only=*/ false));
       if (!verifier_deps->ParseStoredData(dex_files, input_vdex_file_->GetVerifierDepsData())) {
@@ -1884,7 +1875,7 @@ class Dex2Oat final {
           for (const std::string& filter : no_inline_filters) {
             // Use dex_file->GetLocation() rather than dex_file->GetBaseLocation(). This
             // allows tests to specify <test-dexfile>!classes2.dex if needed but if the
-            // base location passes the StartsWith() test, so do all extra locations.
+            // base location passes the `starts_with()` test, so do all extra locations.
             std::string dex_location = dex_file->GetLocation();
             if (filter.find('/') == std::string::npos) {
               // The filter does not contain the path. Remove the path from dex_location as well.
@@ -1894,7 +1885,7 @@ class Dex2Oat final {
               }
             }
 
-            if (android::base::StartsWith(dex_location, filter)) {
+            if (dex_location.starts_with(filter)) {
               VLOG(compiler) << "Disabling inlining from " << dex_file->GetLocation();
               no_inline_from_dex_files.push_back(dex_file);
               break;
@@ -1910,7 +1901,6 @@ class Dex2Oat final {
 
     driver_.reset(new CompilerDriver(compiler_options_.get(),
                                      verification_results_.get(),
-                                     compiler_kind_,
                                      thread_count_,
                                      swap_fd_));
 
@@ -1970,6 +1960,9 @@ class Dex2Oat final {
           UNREACHABLE();
         }
       }
+    }
+    if (IsAppImage()) {
+      AotClassLinker::SetAppImageDexFiles(&compiler_options_->GetDexFilesForOatFile());
     }
 
     // Register dex caches and key them to the class loader so that they only unload when the
@@ -2131,7 +2124,8 @@ class Dex2Oat final {
         oat_writer->PrepareLayout(&patcher);
         elf_writer->PrepareDynamicSection(oat_writer->GetOatHeader().GetExecutableOffset(),
                                           oat_writer->GetCodeSize(),
-                                          oat_writer->GetDataBimgRelRoSize(),
+                                          oat_writer->GetDataImgRelRoSize(),
+                                          oat_writer->GetDataImgRelRoAppImageOffset(),
                                           oat_writer->GetBssSize(),
                                           oat_writer->GetBssMethodsOffset(),
                                           oat_writer->GetBssRootsOffset(),
@@ -2173,14 +2167,14 @@ class Dex2Oat final {
         }
         elf_writer->EndText(text);
 
-        if (oat_writer->GetDataBimgRelRoSize() != 0u) {
-          OutputStream* data_bimg_rel_ro = elf_writer->StartDataBimgRelRo();
-          if (!oat_writer->WriteDataBimgRelRo(data_bimg_rel_ro)) {
-            LOG(ERROR) << "Failed to write .data.bimg.rel.ro section to the ELF file "
+        if (oat_writer->GetDataImgRelRoSize() != 0u) {
+          OutputStream* data_img_rel_ro = elf_writer->StartDataImgRelRo();
+          if (!oat_writer->WriteDataImgRelRo(data_img_rel_ro)) {
+            LOG(ERROR) << "Failed to write .data.img.rel.ro section to the ELF file "
                 << oat_file->GetPath();
             return false;
           }
-          elf_writer->EndDataBimgRelRo(data_bimg_rel_ro);
+          elf_writer->EndDataImgRelRo(data_img_rel_ro);
         }
 
         if (!oat_writer->WriteHeader(elf_writer->GetStream())) {
@@ -2348,18 +2342,6 @@ class Dex2Oat final {
         << "The profile has to be loaded before we can decided "
         << "if we do profile guided optimizations";
     return profile_compilation_info_ != nullptr && !profile_compilation_info_->IsEmpty();
-  }
-
-  bool DoGenerateCompactDex() const {
-    return compact_dex_level_ != CompactDexLevel::kCompactDexLevelNone;
-  }
-
-  bool DoDexLayoutOptimizations() const {
-    // Only run dexlayout when being asked to generate compact dex. We do this
-    // to avoid having multiple arguments being passed to dex2oat and the main
-    // user of dex2oat (installd) will have the same reasons for
-    // disabling/enabling compact dex and dex layout.
-    return DoGenerateCompactDex();
   }
 
   bool DoOatLayoutOptimizations() const {
@@ -2656,13 +2638,12 @@ class Dex2Oat final {
     for (const std::unique_ptr<File>& oat_file : oat_files_) {
       elf_writers_.emplace_back(linker::CreateElfWriterQuick(*compiler_options_, oat_file.get()));
       elf_writers_.back()->Start();
-      bool do_oat_writer_layout = DoDexLayoutOptimizations() || DoOatLayoutOptimizations();
+      bool do_oat_writer_layout = DoOatLayoutOptimizations();
       oat_writers_.emplace_back(new linker::OatWriter(
           *compiler_options_,
           verification_results_.get(),
           timings_,
-          do_oat_writer_layout ? profile_compilation_info_.get() : nullptr,
-          compact_dex_level_));
+          do_oat_writer_layout ? profile_compilation_info_.get() : nullptr));
     }
   }
 
@@ -2908,7 +2889,6 @@ class Dex2Oat final {
   }
 
   std::unique_ptr<CompilerOptions> compiler_options_;
-  Compiler::Kind compiler_kind_;
 
   std::unique_ptr<OatKeyValueStore> key_value_store_;
 
@@ -2969,9 +2949,6 @@ class Dex2Oat final {
   std::string android_root_;
   std::string no_inline_from_string_;
   bool force_allow_oj_inlines_ = false;
-
-  // TODO(b/256664509): Clean this up.
-  CompactDexLevel compact_dex_level_ = CompactDexLevel::kCompactDexLevelNone;
 
   std::vector<std::unique_ptr<linker::ElfWriter>> elf_writers_;
   std::vector<std::unique_ptr<linker::OatWriter>> oat_writers_;

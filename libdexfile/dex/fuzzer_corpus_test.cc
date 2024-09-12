@@ -65,14 +65,6 @@ class ZipArchiveHandleScope {
   std::unique_ptr<ZipArchiveHandle> handle_;
 };
 
-// Returns true if `str` ends with `suffix`.
-inline bool EndsWith(std::string const& str, std::string const& suffix) {
-  if (suffix.size() > str.size()) {
-    return false;
-  }
-  return std::equal(suffix.rbegin(), suffix.rend(), str.rbegin());
-}
-
 // Tests that we can verify dex files without crashing.
 TEST_F(FuzzerCorpusTest, VerifyCorpusDexFiles) {
   // These dex files are expected to pass verification. The others are regressions tests.
@@ -101,7 +93,7 @@ TEST_F(FuzzerCorpusTest, VerifyCorpusDexFiles) {
   std::string name;
   std::vector<char> data;
   while ((error = Next(cookie, &entry, &name)) >= 0) {
-    if (!EndsWith(name, ".dex")) {
+    if (!name.ends_with(".dex")) {
       // Skip non-DEX files.
       LOG(WARNING) << "Found a non-dex file: " << name;
       continue;
@@ -113,7 +105,7 @@ TEST_F(FuzzerCorpusTest, VerifyCorpusDexFiles) {
 
     const bool expected_success = valid_dex_files.find(name) != valid_dex_files.end();
     VerifyDexFile(
-        reinterpret_cast<const uint8_t*>(data.data()), data.size(), name.c_str(), expected_success);
+        reinterpret_cast<const uint8_t*>(data.data()), data.size(), name, expected_success);
   }
 
   ASSERT_TRUE(error >= -1) << "failed iterating " << filename << " : " << ErrorCodeString(error);

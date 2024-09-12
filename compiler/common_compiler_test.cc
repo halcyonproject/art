@@ -24,8 +24,8 @@
 #include "art_method-inl.h"
 #include "base/callee_save_type.h"
 #include "base/casts.h"
-#include "base/enums.h"
 #include "base/memfd.h"
+#include "base/pointer_size.h"
 #include "base/utils.h"
 #include "class_linker.h"
 #include "dex/descriptors_names.h"
@@ -255,14 +255,6 @@ void CommonCompilerTestImpl::SetUpRuntimeOptionsImpl() {
   ApplyInstructionSet();
 }
 
-Compiler::Kind CommonCompilerTestImpl::GetCompilerKind() const {
-  return compiler_kind_;
-}
-
-void CommonCompilerTestImpl::SetCompilerKind(Compiler::Kind compiler_kind) {
-  compiler_kind_ = compiler_kind;
-}
-
 void CommonCompilerTestImpl::TearDown() {
   code_and_metadata_.clear();
   compiler_options_.reset();
@@ -278,8 +270,7 @@ void CommonCompilerTestImpl::CompileMethod(ArtMethod* method) {
     DCHECK(!Runtime::Current()->IsStarted());
     Thread* self = Thread::Current();
     StackHandleScope<2> hs(self);
-    std::unique_ptr<Compiler> compiler(
-        Compiler::Create(*compiler_options_, &storage, compiler_kind_));
+    std::unique_ptr<Compiler> compiler(Compiler::Create(*compiler_options_, &storage));
     const DexFile& dex_file = *method->GetDexFile();
     Handle<mirror::DexCache> dex_cache =
         hs.NewHandle(GetClassLinker()->FindDexCache(self, dex_file));
