@@ -521,6 +521,10 @@ inline bool ArtField::IsUnmodifiable(auto&& get_field_type) {
     return false;
   }
 
+  if (declaring_class->IsBootStrapClassLoaded() && !declaring_class->IsRecordClass()) {
+    return false;
+  }
+
   if (IsMonotonic()) {
     return true;
   }
